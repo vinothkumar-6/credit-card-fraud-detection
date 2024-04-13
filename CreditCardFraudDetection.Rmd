@@ -1,0 +1,587 @@
+---
+title: "Credit Card Fraud Detection"
+output: html_notebook
+---
+
+# PROJECT TOPIC -  CREDIT CARD FRAUD DETECTION
+
+#1. Data Description:
+Time- Number of seconds elapsed between this transaction and the first transaction in the dataset
+V1-V28 - Result of a PCA Dimensionality reduction to protect user identities and sensitive features(v1-v28)
+Amount - Transaction amount
+Class - 1 for fraudulent transactions, 0 otherwise
+
+#Goal
+
+To identify fraudulent transactions  which can result in significant financial losses for individuals and businesses. The goal is to develop a machine learning model that can accurately classify transactions as either fraudulent or legitimate, based on various features such as transaction amount, location, and time.
+
+#Dataset Reference:
+
+The Credit Card Fraud Detection dataset on Kaggle at the following link https://www.kaggle.com/mlg-ulb/creditcardfraud  Links to an external site.
+The dataset has 31 variables, with the target variable indicating whether a transaction is fraudulent or not.
+
+#Model:
+
+I will be using a classification model to solve the problem of credit card fraud detection. The outcome variable will be a binary variable indicating whether a credit card transaction is fraudulent or not.
+
+```{r}
+library(tidyverse)
+library(caret)
+library(ggplot2)
+library(lattice)
+library(gridExtra)
+library(corrplot)
+library(ROCR)
+```
+
+
+#1 Loading the dataset:
+```{r}
+credit_card <- read.csv("/Users/vinoth/Downloads/creditcard.csv")
+credit_card$Class = factor(credit_card$Class,levels = c(0,1))
+```
+
+# Getting the summary of structure of dataset
+```{r}
+head(credit_card)
+dim(credit_card)
+str(credit_card)
+summary(credit_card)
+```
+# Using duplicated function to duplicated elements.
+```{r}
+duplicated(credit_card)
+```
+
+
+#Number of missing values in realtor dataset.
+```{r}
+sum(is.na(credit_card))
+```
+
+There are no missing values in the dataset.
+
+
+#Class Distribution: 
+
+```{r}
+table(credit_card$Class)
+barplot(table(credit_card$Class))
+```
+
+#Time and Amount Analysis: 
+```{r}
+hist(credit_card$Time)
+hist(credit_card$Amount)
+```
+```{r}
+boxplot(Amount ~ Class, data = credit_card, xlab = "Class", ylab = "Amount")
+plot(credit_card$V1, credit_card$V2, col = ifelse(credit_card$Class == 1, "red", "blue"),xlab = "V1", ylab = "V2")
+```
+
+#Finding the Correlation of every feature vs Class Feature.
+```{r}
+correlation <- cor(credit_card[,-31], as.numeric(credit_card[,31]))
+correlation
+```
+The columns labeled as v1, v3, v10, v12, v14, v16, v17, and v18 exhibit a negative correlation, indicating a strong inverse relationship. Conversely, the columns v2, v4, and v11 demonstrate a positive correlation, indicating a direct relationship. The remaining columns do not display a significant correlation with the class variable, suggesting that they are not strongly associated with it.
+
+```{r}
+corrplot(correlation, method = "pie", cl.pos='n')
+```
+
+On the Above observation we can conclude that:
+
+Variables with Strong Negative Correlations:
+V10 (-0.2168829436)
+V12 (-0.2605929249)
+V14 (-0.3025436958)
+V17 (-0.3264810672)
+Variables with Moderate Negative Correlations:
+V3 (-0.1929608271)
+V7 (-0.1872565915)
+V16 (-0.1965389403)
+Variables with Moderate Positive Correlations:
+V4 (0.1334474862)
+
+#removing less correlated variables.
+```{r}
+credit_card <- select(credit_card, V3, V4, V7, V10, V12, V14, V16, V17, Class)
+credit_card
+```
+
+```{r}
+summary(credit_card)
+```
+
+#Box Plot, Density plot for all Feature vs Class
+
+```{r}
+boxplot_plots <- list()
+density_plots <- list()
+
+for (var in c("V3", "V4", "V7", "V10", "V12", "V14", "V16", "V17")) {
+
+  boxplot_plot <- ggplot(credit_card, aes(x = factor(Class), y = .data[[var]], fill = factor(Class))) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", var, "by Class")) +
+    theme_minimal()
+
+    boxplot_plots <- append(boxplot_plots, list(boxplot_plot))
+
+  density_plot <- ggplot(credit_card, aes(x = .data[[var]], fill = factor(Class))) +
+    geom_density(alpha = 0.7) +
+    labs(title = paste("Density Plot of", var, "by Class")) +
+    theme_minimal()
+  
+   density_plots <- append(density_plots, list(density_plot))
+}
+
+for (plot in boxplot_plots) {
+  print(plot)
+}
+
+for (plot in density_plots) {
+  print(plot)
+}
+```
+
+
+```{r}
+#t-test
+for (var in c("V3", "V4", "V7", "V10", "V12", "V14", "V16", "V17")) {
+  class_0 <- credit_card[[var]][credit_card$Class == 0]
+  class_1 <- credit_card[[var]][credit_card$Class == 1]
+  t_test <- t.test(class_0, class_1)
+  cat(paste("Variable:", var, "\n"))
+  cat(paste("t-test p-value:", t_test$p.value, "\n\n"))
+}
+```
+
+#Under Sampling and Over Sampling of data
+
+```{r}
+credit_card_0 <- credit_card[credit_card$Class == 0, ]
+credit_card_1 <- credit_card[credit_card$Class == 1, ]
+
+#Undersampling
+credit_card_0_down <- credit_card_0[sample(nrow(credit_card_0), 50000), ]
+
+# Oversampling
+credit_card_1_over <- credit_card_1[sample(nrow(credit_card_1), 50000, replace = TRUE), ]
+
+#Combining
+credit_card <- rbind(credit_card_0_down, credit_card_1_over)
+
+credit_card
+```
+
+```{r}
+dim(credit_card)
+summary(credit_card)
+```
+
+#Radomizing the data before spliting
+```{r}
+credit_card <- credit_card[sample(nrow(credit_card)), ]
+credit_card
+```
+
+#Spliting the data into training and testing sets
+```{r}
+levels(credit_card$Class)=list(No ="0", Yes="1")
+set.seed(123)
+train_indices <- createDataPartition(credit_card$Class, p = 0.7, list = FALSE)
+train_data <- credit_card[train_indices, ]
+test_data <- credit_card[-train_indices, ]
+
+```
+
+```{r}
+# Check the dimensions of the train and test sets
+dim(train_data)
+dim(test_data)
+str(train_data)
+str(test_data)
+```
+# Decision tree using c50.
+```{r}
+library(C50)
+
+model_boosted <- C5.0(Class ~ ., data = train_data, trials = 30)
+
+pred_boosted <- predict(model_boosted, newdata = test_data, type = "class")
+
+confusion_matrix_boosted <- table(test_data$Class, pred_boosted)
+
+confusion_matrix_boosted
+
+accuracy_boosted <- sum(diag(confusion_matrix_boosted)) / sum(confusion_matrix_boosted)
+
+total_error_boosted <- 1 - accuracy_boosted
+
+precision_boosted <- diag(confusion_matrix_boosted) / colSums(confusion_matrix_boosted)
+recall_boosted <- diag(confusion_matrix_boosted) / rowSums(confusion_matrix_boosted)
+
+precision_recall_boosted <- data.frame(Precision = precision_boosted, Recall = recall_boosted)
+
+precision_recall_total_boosted <- rbind(precision_recall_boosted, c(mean(precision_boosted), mean(recall_boosted)))
+
+precision_recall_total_boosted$Labels <- c(levels(test_data$Class), "Average")
+
+print(confusion_matrix_boosted)
+print(accuracy_boosted)
+print(paste0("Total Error: ", round(total_error_boosted, 4)))
+print(precision_recall_total_boosted)
+```
+
+#Desicion Tree using rpart
+```{r}
+credit_data_model <- train(Class ~ ., data = train_data, method = "rpart", trControl = trainControl(method = "cv", number = 5))
+credit_data_pred <- predict(credit_data_model, test_data)
+credit_data_cm <- confusionMatrix(credit_data_pred, test_data$Class)
+credit_data_auc <- credit_data_cm$overall[1] *100
+credit_data_auc
+credit_data_acc <- credit_data_cm$overall[4] *100
+credit_data_acc
+cat("Accuracy of Decision Tree Model" ,credit_data_acc,". Summary of ROC Curve ",credit_data_auc)
+credit_data_model
+```
+#Knn
+
+```{r}
+set.seed(1)
+knn_credit_card<- train(Class ~ ., data = train_data, trControl = trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary) ,method = "knn",metric ="ROC")
+knn_credit_card
+```
+
+```{r}
+knn_predictions_prob=predict(knn_credit_card, test_data, type="prob")
+knn_predictions= prediction(knn_predictions_prob$Yes,test_data$Class)
+performance(knn_predictions, measure = "auc")
+knn_predicted_labels = predict(knn_credit_card, test_data)
+confusionMatrix(knn_predicted_labels, test_data$Class ,positive="Yes", mode="everything")
+```
+
+```{r}
+plot(knn_predictions_prob)
+```
+
+Accuracy : 0.9938
+
+```{r}
+set.seed(1)
+knn_smote<- train(Class ~ ., data = train_data,trControl  =trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary,sampling="smote") ,method = "knn",metric ="ROC")
+knn_smote
+```
+
+```{r}
+knn_smote_predictions_prob=predict(knn_smote, test_data, type="prob")
+knn_smote_predictions= prediction(knn_smote_predictions_prob$Yes,test_data$Class)
+
+performance(knn_smote_predictions, measure = "auc")
+knn_smote_predicted_labels = predict(knn_smote, test_data)
+confusionMatrix(knn_smote_predicted_labels, test_data$Class ,positive="Yes", mode="everything")
+```
+
+Accuracy : 0.9938
+
+
+#SVM
+
+```{r}
+set.seed(1)
+
+svm_credit<- train(Class ~ ., data = train_data,
+             trControl = trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary) ,method = "svmLinear",metric ="ROC")
+svm_credit
+```
+```{r}
+svm_predictions_prob=predict(svm_credit, test_data, type="prob")
+svm_predictions= prediction(svm_predictions_prob$Yes,test_data$Class)
+svm_predictions_prob
+
+performance(svm_predictions, measure = "auc")
+svm_predicted_labels = predict(svm_credit, test_data)
+confusionMatrix(svm_predicted_labels, test_data$Class ,positive="Yes", mode="everything")
+
+```
+ Accuracy : 0.9421
+
+#SVM Smote
+```{r}
+set.seed(1)
+ctrl=trainControl(method="cv", number=10, classProbs = TRUE, summaryFunction = twoClassSummary, 
+sampling="smote")
+svm_smote<-train(Class ~ ., data = train_data, method = "svmLinear", verbose=FALSE, metric ="ROC", 
+trControl= ctrl)
+svm_smote
+
+svm_smote_predictions_prob=predict(svm_smote, test_data, type="prob")
+svm_smote_predictions= prediction(svm_smote_predictions_prob$Yes,test_data$Class)
+
+performance(svm_smote_predictions, measure = "auc")
+svm_smote_predicted_labels = predict(svm_smote, test_data)
+confusionMatrix(svm_smote_predicted_labels, test_data$Class ,positive="Yes", mode="everything")
+```
+
+
+Accuracy : 0.9421
+
+
+## SVM Radial
+
+```{r}
+set.seed(1)
+credit_rsvm_model <- train(Class ~ ., data = train_data, method = "svmRadial", trControl = trainControl(method = "cv", number = 10))
+credit_rsvm_model
+credit_rsvm_pred <- predict(credit_rsvm_model, test_data)
+credit_rsvm_cm <- confusionMatrix(credit_rsvm_pred, test_data$Class)
+credit_rsvm_auc <- credit_rsvm_cm$overall[1] *100
+credit_rsvm_acc <- credit_rsvm_cm$overall[4] *100
+credit_rsvm_auc
+
+```
+Accuracy 96.85 
+
+```{r}
+credit_rsvm_model
+credit_rsvm_cm
+```
+
+
+#RandomForest
+
+```{r}
+set.seed(1)
+credit_rf_model <- train(Class ~ ., data = train_data, method = "rf",importance= T,metric = "ROC", trControl = trainControl(method = "cv", number = 10,  classProbs = TRUE))
+credit_rf_model
+```
+
+```{r}
+credit_rf_pred <- predict(credit_rf_model, test_data)
+credit_rf_cm <- confusionMatrix(credit_rf_pred, test_data$Class)
+credit_rf_auc <- credit_rf_cm$overall[1]
+credit_rf_acc <- credit_rf_cm$overall[4]
+credit_rf_auc
+varImp(credit_rf_model)
+```
+
+```{r}
+credit_rf_model
+credit_rf_cm
+```
+
+
+#Gradient Boosted Tree model
+
+```{r}
+set.seed(1)
+credit_gbm_model <- train(Class ~ ., data = train_data, method = "gbm", trControl  = trainControl(method = "cv", number = 10))
+credit_gbm_predictions <- predict(credit_gbm_model,test_data)
+credit_gbm_cm <- confusionMatrix(credit_gbm_predictions, test_data$Class)
+credit_gbm_auc <- credit_gbm_cm$overall[1]
+credit_gbm_auc
+credit_gbm_acc <- credit_gbm_cm$overall[4]
+credit_gbm_acc
+```
+
+Accuracy : 0.9698 
+```{r}
+credit_gbm_model
+credit_gbm_cm
+```
+
+## XGBoost
+
+```{r}
+set.seed(1)
+credit_xgb_model <- train(Class ~ ., data = train_data, method = "xgbTree", trControl = trainControl(method = "cv", number = 10),verbosity = 0)
+credit_xgb_model
+credit_xgb_pred <- predict(credit_xgb_model, test_data)
+credit_xgb_cm <- confusionMatrix(credit_xgb_pred, test_data$Class)
+credit_xgb_auc <- credit_xgb_cm$overall[1] *100
+credit_xgb_acc <- credit_xgb_cm$overall[4] *100
+credit_xgb_auc
+```
+
+```{r}
+credit_xgb_model
+credit_xgb_cm
+```
+
+
+```{r}
+train_data$Class=as.numeric(train_data$Class)-1
+test_data$Class=as.numeric(test_data$Class)-1
+```
+
+
+```{r}
+head(test_data)
+head(train_data)
+```
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+scale.cols <- c("V3","V4","V7","V10","V12","V14","V16","V17")
+train_data[scale.cols] <- lapply(train_data[scale.cols], normalize)
+test_data[scale.cols] <- lapply(test_data[scale.cols], normalize)
+train_data
+test_data
+```
+#Neural Network Model
+
+```{r}
+set.seed(1)
+credit_train_idex1<- createDataPartition(train_data$Class, p = 0.9, list = FALSE)
+
+credit_card_train = train_data[credit_train_idex1,]
+credit_card_valid = train_data[-credit_train_idex1,]
+
+credit_card_train_x <- credit_card_train[, -9]
+credit_card_train_y <- credit_card_train[, 9]
+credit_card_valid_x <- credit_card_valid[,-9]
+credit_card_valid_y <- credit_card_valid[, 9]
+credit_card_test_x <-test_data[, -9]
+credit_card_test_y <- test_data[, 9]
+```
+
+
+
+```{r}
+library(keras)
+set.seed(1)
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 64, activation = "relu", input_shape = as.matrix(dim(credit_card_train_x)[2])) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+
+model %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  metrics = "accuracy"
+
+  
+)
+
+history <- model %>% fit(
+  as.matrix(credit_card_train_x),
+  credit_card_train_y,
+  batch_size = 50,
+  epochs = 20,
+  verbose = 2,
+  validation_data = list(as.matrix(credit_card_valid_x), credit_card_valid_y)
+)
+
+predicted_probs <- model %>% predict(as.matrix(credit_card_test_x))
+str(predicted_probs)
+
+```
+```{r}
+
+ann_predictions= prediction(predicted_probs,credit_card_test_y)
+ann_predictions
+performance(ann_predictions, measure = "auc")@y.values
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+predicted.labels = factor(ifelse(predicted_probs>0.5, "1", "0"))
+confusionMatrix(predicted.labels, as.factor(credit_card_test_y),mode="everything", positive="1")
+
+```
+The Accuracy of Neural Network Model is 90.7
+
+```{r}
+model
+```
+
+#Neural Network Model With Classweights.
+```{r}
+library(keras)
+
+model_weight <- keras_model_sequential() %>%
+  layer_dense(units = 64, activation = "relu", input_shape = as.matrix(dim(credit_card_train_x)[2])) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+
+model_weight %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  metrics = "accuracy"
+)
+
+history_model <- model_weight %>% fit(
+  as.matrix(credit_card_train_x),
+  credit_card_train_y,
+  batch_size = 50,
+  epochs = 20,
+  verbose = 2,
+  validation_data = list(as.matrix(credit_card_valid_x), credit_card_valid_y),class_weight=list("0", "1")
+
+)
+```
+
+```{R}
+plot(history_model)
+```
+
+```{R}
+predicted_probs_weight <- model_weight %>% predict(as.matrix(credit_card_test_x))
+str(predicted_probs_weight)
+
+```
+
+
+```{R}
+ann_predictions_weight= prediction(predicted_probs,credit_card_test_y)
+ann_predictions_weight
+performance(ann_predictions_weight, measure = "auc")@y.values
+
+```
+
+```{R}
+range(credit_card_test_x)
+```
+
+```{R}
+predicted.labels_weight = factor(ifelse(predicted_probs_weight>0.5, "1", "0"))
+confusionMatrix(predicted.labels_weight, as.factor(credit_card_test_y),mode="everything", positive="1")
+```
+
+
+#Summary of Accuracy
+
+Random Forest: 99.99%
+
+DecisionTreeModel using C50: 99.97%
+
+XGBoost: 99.93797%
+
+KNN Smote: 99.38%
+
+KNN: 99.38%
+
+Gradient Boosted Tree model: 97.17%
+
+SVM Radical: 97.04%
+
+NeuralNetwork with class weight: 92.64%
+
+DecisionTreeModel using rpart: 93.50195%
+
+SVM Smote: 94.21%
+
+SVM: 94.21%
+
+Neural Network Model: 90.7%
+
+
