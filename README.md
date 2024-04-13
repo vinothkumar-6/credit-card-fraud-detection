@@ -40,4 +40,4 @@ The dataset used in this project is available on Kaggle: [Credit Card Fraud Dete
 3. Run the provided Jupyter Notebook or Python script to train and evaluate the machine learning models.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
